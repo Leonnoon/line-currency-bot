@@ -30,30 +30,44 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    text = event.message.text.strip()  # 去除前後空白
+    # 將輸入的文字前後去空白，並將英文字母全部轉為大寫（這樣輸入 usd 或 USD 都通）
+    text = event.message.text.strip().upper()
 
-    # 修改點：檢查是不是純數字（或是帶小數點的數字）
-    # 如果不是數字，代表群組在聊天，直接 return 裝死，不打擾大家
+    # 拆開字串，例如 "USD 100" 會被拆成 ["USD", "100"]
+    parts = text.split()
+    
+    # 檢查格式是不是「外幣名稱 + 數字」兩部分，如果不是，代表群組在聊天，直接裝死
+    if len(parts) != 2:
+        return
+
+    currency = parts[0]  # 外幣名稱 (例如: USD)
+    amount_str = parts[1] # 數字部分 (例如: 100)
+
+    # 檢查支援的外幣，如果不符合，一樣裝死不洗版
+    if currency not in ["USD", "JPY", "THB"]:
+        return
+
+    # 檢查第二個部分是不是真的數字
     try:
-        amount = float(text)
+        amount = float(amount_str)
     except ValueError:
-        return 
+        return
 
-    # 如果是數字，才開始抓匯率計算
+    # 開始抓取匯率並計算
     try:
+        # 這裡依然以 TWD 為基準，因為這個免費 API 用 TWD 當基準最穩定
         url = "https://api.exchangerate-api.com/v4/latest/TWD"
-        res = requests.get(url, timeout=5)  # 加上 timeout 防止 API 卡死
+        res = requests.get(url, timeout=5)
         data = res.json()
 
-        usd = amount * data["rates"]["USD"]
-        jpy = amount * data["rates"]["JPY"]
-        thb = amount * data["rates"]["THB"]
+        # 這裡的邏輯是反過來：台幣金額 = 外幣金額 / 該外幣對台幣的匯率
+        rate = data["rates"][currency]
+        twd_amount = amount / rate
 
-        reply = f"""💰 台幣 {amount:,} 元換算：
+        # 根據不同貨幣給予不同國旗與文字
+        flag = {"USD": "💵 美元", "JPY": "🇯🇵 日圓", "THB": "🇹🇭 泰銖"}.get(currency, currency)
 
-💵 USD 美元：{usd:.2f}
-🇯🇵 JPY 日圓：{jpy:.2f}
-🇹🇭 THB 泰銖：{thb:.2f}"""
+        reply = f"💰 匯率換算結果：\n\n{flag} {amount:,} 元\n👉 💸 折合台幣約：{twd_amount:.2f} 元"
 
     except Exception as e:
         reply = "目前無法取得即時匯率，請稍後再試！"
@@ -62,9 +76,3 @@ def handle_message(event):
         event.reply_token,
         TextSendMessage(text=reply)
     )
-
-
-if __name__ == "__main__":
-    # 修改點：這行是 Render 能成功啟動的關鍵！
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
